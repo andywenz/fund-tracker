@@ -1,0 +1,93 @@
+version: '3.8'
+
+services:
+  # MongoDB数据库
+  mongo:
+    image: mongo:4.4
+    restart: always
+    volumes:
+      - mongo_data:/data/db
+    environment:
+      - MONGO_INITDB_ROOT_USERNAME=${MONGO_USERNAME:-admin}
+      - MONGO_INITDB_ROOT_PASSWORD=${MONGO_PASSWORD:-password}
+    ports:
+      - "27017:27017"
+    networks:
+      - fund-tracker-network
+
+  # 消息队列
+  rabbitmq:
+    image: rabbitmq:3-management
+    restart: always
+    ports:
+      - "5672:5672"   # AMQP端口
+      - "15672:15672" # 管理界面端口
+    environment:
+      - RABBITMQ_DEFAULT_USER=${RABBITMQ_USER:-admin}
+      - RABBITMQ_DEFAULT_PASS=${RABBITMQ_PASSWORD:-password}
+    networks:
+      - fund-tracker-network
+
+  # 后端API服务
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    restart: always
+    depends_on:
+      - mongo
+      - rabbitmq
+    ports:
+      - "8000:8000"
+    environment:
+      - MONGO_URL=mongodb://${MONGO_USERNAME:-admin}:${MONGO_PASSWORD:-password}@mongo:27017
+      - DATABASE_NAME=${DATABASE_NAME:-fund_tracker}
+      - RABBITMQ_HOST=rabbitmq
+      - RABBITMQ_USER=${RABBITMQ_USER:-admin}
+      - RABBITMQ_PASSWORD=${RABBITMQ_PASSWORD:-password}
+    networks:
+      - fund-tracker-network
+
+  # 数据爬虫服务
+  data-crawler:
+    build:
+      context: ./data-crawler
+      dockerfile: Dockerfile
+    restart: always
+    depends_on:
+      - mongo
+      - rabbitmq
+      - backend
+    environment:
+      - MONGO_URL=mongodb://${MONGO_USERNAME:-admin}:${MONGO_PASSWORD:-password}@mongo:27017
+      - DATABASE_NAME=${DATABASE_NAME:-fund_tracker}
+      - RABBITMQ_HOST=rabbitmq
+      - RABBITMQ_USER=${RABBITMQ_USER:-admin}
+      - RABBITMQ_PASSWORD=${RABBITMQ_PASSWORD:-password}
+      - FUND_CODES=${FUND_CODES:-}
+      - CRAWL_INTERVAL=${CRAWL_INTERVAL:-3600}
+    networks:
+      - fund-tracker-network
+
+  # 前端服务
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    restart: always
+    depends_on:
+      - backend
+    ports:
+      - "80:80"
+    environment:
+      - REACT_APP_API_BASE_URL=/api
+    networks:
+      - fund-tracker-network
+
+networks:
+  fund-tracker-network:
+    driver: bridge
+
+volumes:
+  mongo_data:
+    driver: local
